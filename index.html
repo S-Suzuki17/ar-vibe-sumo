@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-select=no">
+<title>AR-Vibe相撲：スクールデスク・バトル</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #090a0f;
+    color: #fff;
+    font-family: 'Hiragino Kaku Gothic ProN', 'Segoe UI', system-ui, sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+
+  /* Camera Video Background */
+  #camera-video {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 1;
+    display: none;
+  }
+
+  /* Dark Studio Background (No camera mode) */
+  #studio-bg {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 1;
+    background: radial-gradient(circle at 50% 45%, #181d2a 0%, #0d1017 65%, #050608 100%);
+  }
+
+  /* 3D WebGL Canvas */
+  #canvas-container {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 2;
+  }
+
+  /* UI Overlay */
+  #ui-layer {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 100%;
+    padding: 12px;
+    pointer-events: none;
+  }
+
+  /* Top Control Strip */
+  .top-control-strip {
+    pointer-events: auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .pill-badge {
+    background: rgba(15, 20, 32, 0.85);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 800;
+    color: #ffd700;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  }
+  .mode-toggle-btn {
+    background: rgba(15, 20, 32, 0.85);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .mode-toggle-btn:hover {
+    border-color: #00f0ff;
+    background: rgba(0, 240, 255, 0.15);
+  }
+
+  /* Battle HUD (Shown after dohyo emergence) */
+  #battle-hud {
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    background: rgba(12, 16, 26, 0.9);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 215, 0, 0.35);
+    border-radius: 16px;
+    padding: 10px 14px;
+    box-shadow: 0 10px 32px rgba(0,0,0,0.7);
+    margin-top: 6px;
+    pointer-events: auto;
+  }
+  .wrestler-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .wrestler-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .wrestler-avatar {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 18px;
+    font-weight: 900;
+    border: 2px solid #fff;
+  }
+  .wrestler-avatar.east { background: #0066ff; border-color: #60a5fa; box-shadow: 0 0 10px rgba(0,102,255,0.5); }
+  .wrestler-avatar.west { background: #dc2626; border-color: #f87171; box-shadow: 0 0 10px rgba(220,38,38,0.5); }
+  .wrestler-name { font-size: 13px; font-weight: 800; }
+  .wrestler-side { font-size: 10px; color: #94a3b8; }
+
+  /* Push Gauge */
+  .push-gauge-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .gauge-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    font-weight: bold;
+    color: #cbd5e1;
+  }
+  .push-track {
+    width: 100%;
+    height: 10px;
+    background: #1e293b;
+    border-radius: 5px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.2);
+  }
+  .push-indicator {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 16px;
+    background: #ffd700;
+    border-radius: 4px;
+    transform: translateX(-50%);
+    box-shadow: 0 0 12px #ffd700;
+    transition: left 0.05s ease-out;
+  }
+  .push-center-mark {
+    position: absolute;
+    left: 50%; top: 0; bottom: 0;
+    width: 2px;
+    background: rgba(255,255,255,0.4);
+    transform: translateX(-50%);
+  }
+
+  /* AR Desk Scan Reticle (Target overlay) */
+  #ar-scan-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 20;
+  }
+  .scan-reticle {
+    width: 200px;
+    height: 200px;
+    border: 2px dashed rgba(255, 215, 0, 0.7);
+    border-radius: 50%;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    animation: rotateReticle 10s linear infinite;
+    box-shadow: 0 0 30px rgba(255, 215, 0, 0.25);
+  }
+  @keyframes rotateReticle {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .reticle-corner {
+    position: absolute;
+    width: 20px; height: 20px;
+    border: 3px solid #ffd700;
+  }
+  .reticle-corner.tl { top: -10px; left: -10px; border-right: none; border-bottom: none; }
+  .reticle-corner.tr { top: -10px; right: -10px; border-left: none; border-bottom: none; }
+  .reticle-corner.bl { bottom: -10px; left: -10px; border-right: none; border-top: none; }
+  .reticle-corner.br { bottom: -10px; right: -10px; border-left: none; border-top: none; }
+  .scan-center-dot {
+    width: 14px; height: 14px;
+    background: #ffd700;
+    border-radius: 50%;
+    box-shadow: 0 0 15px #ffd700;
+    animation: pulseDot 1s infinite alternate;
+  }
+  @keyframes pulseDot {
+    from { transform: scale(0.8); opacity: 0.6; }
+    to { transform: scale(1.3); opacity: 1.0; }
+  }
+  .scan-prompt-box {
+    margin-top: 30px;
+    background: rgba(10, 14, 24, 0.88);
+    border: 1px solid #ffd700;
+    border-radius: 30px;
+    padding: 12px 24px;
+    text-align: center;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.6);
+  }
+  .scan-prompt-title {
+    font-size: 16px;
+    font-weight: 900;
+    color: #ffd700;
+    letter-spacing: 1px;
+  }
+  .scan-prompt-sub {
+    font-size: 11px;
+    color: #cbd5e1;
+    margin-top: 3px;
+  }
+
+  /* Center Status & Gyoji Calls */
+  #announcement-box {
+    position: absolute;
+    top: 40%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+    z-index: 50;
+    width: 90%;
+  }
+  #gyoji-call {
+    font-size: 38px;
+    font-weight: 900;
+    letter-spacing: 4px;
+    color: #ffd700;
+    text-shadow: 0 0 30px rgba(255, 215, 0, 0.8), 0 4px 10px rgba(0,0,0,0.9);
+  }
+  #sub-call {
+    font-size: 15px;
+    font-weight: bold;
+    color: #fff;
+    margin-top: 6px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.9);
+  }
+
+  /* Chaotic Ton-Ton Cushion (Random Spot) */
+  #tonton-spot {
+    position: absolute;
+    width: 86px;
+    height: 86px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255, 215, 0, 0.45) 0%, rgba(255, 80, 0, 0.15) 70%, transparent 100%);
+    border: 3px dashed #ffd700;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 30;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 25px rgba(255, 215, 0, 0.7);
+    animation: pulseSpot 1.2s infinite alternate;
+  }
+  @keyframes pulseSpot {
+    from { transform: translate(-50%, -50%) scale(0.95); opacity: 0.85; }
+    to { transform: translate(-50%, -50%) scale(1.08); opacity: 1.0; }
+  }
+  .spot-inner {
+    font-size: 13px;
+    font-weight: 900;
+    color: #ffd700;
+    text-align: center;
+    pointer-events: none;
+    line-height: 1.2;
+    text-shadow: 0 0 10px rgba(0,0,0,0.8);
+  }
+
+  /* Bottom Controls & Ton-Ton Area */
+  .bottom-hud {
+    pointer-events: auto;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  #tap-arena {
+    width: 100%;
+    max-width: 500px;
+    height: 135px;
+    background: rgba(10, 15, 25, 0.85);
+    backdrop-filter: blur(14px);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    cursor: pointer;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+    transition: border-color 0.15s, transform 0.08s;
+  }
+  #tap-arena:active {
+    transform: scale(0.985);
+    border-color: #ffd700;
+  }
+  .arena-hint {
+    font-size: 15px;
+    font-weight: 900;
+    color: #ffd700;
+    text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+  }
+  .arena-subhint {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-top: 4px;
+  }
+  #sync-ring {
+    position: absolute;
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    border: 3px solid #00f0ff;
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  .reset-dohyo-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: #94a3b8;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    padding: 6px 16px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .reset-dohyo-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+  }
+
+  /* Rhythm Check Overlay ("見合って見合って") */
+  #rhythm-modal {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(10px);
+    z-index: 100;
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 24px;
+    text-align: center;
+    pointer-events: auto;
+  }
+  #rhythm-modal.active { display: flex; }
+  .rhythm-card {
+    background: #151b29;
+    border: 2px solid #ffd700;
+    border-radius: 24px;
+    padding: 24px;
+    max-width: 360px;
+    width: 100%;
+    box-shadow: 0 10px 40px rgba(255, 215, 0, 0.35);
+  }
+  .rhythm-title { font-size: 24px; font-weight: 900; color: #ffd700; margin-bottom: 8px; }
+  .rhythm-desc { font-size: 13px; color: #cbd5e1; margin-bottom: 20px; line-height: 1.5; }
+  #rhythm-touch-btn {
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #f59e0b, #ef4444);
+    border: 4px solid #fff;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 900;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0 auto;
+    cursor: pointer;
+    box-shadow: 0 0 25px rgba(245, 158, 11, 0.6);
+  }
+</style>
+<script src="three.min.js"></script>
+</head>
+<body>
+
+<!-- Real Camera Background -->
+<video id="camera-video" playsinline autoplay muted></video>
+
+<!-- Dark Studio Background (No camera fallback) -->
+<div id="studio-bg"></div>
+
+<div id="canvas-container"></div>
+
+<div id="ui-layer">
+  <!-- Top Control Strip -->
+  <div class="top-control-strip">
+    <div class="pill-badge">
+      <span>📳 ハプティクス連動中</span>
+    </div>
+    <div style="display:flex;gap:6px;">
+      <button class="mode-toggle-btn" id="cam-toggle-btn" onclick="toggleCamera()">📷 カメラAR</button>
+      <button class="mode-toggle-btn" id="bg-toggle-btn" onclick="toggleBackground()">⬛ 背景なし</button>
+    </div>
+  </div>
+
+  <!-- Battle HUD (East vs West) -->
+  <div id="battle-hud">
+    <div class="wrestler-header">
+      <div class="wrestler-card">
+        <div class="wrestler-avatar east">東</div>
+        <div class="wrestler-info">
+          <span class="wrestler-name" style="color:#60a5fa;">碧竜（あなた）</span>
+          <span class="wrestler-side">気合: <b id="p-stamina">100%</b></span>
+        </div>
+      </div>
+
+      <div style="text-align:center;">
+        <span style="font-size:12px;font-weight:900;color:#ffd700;">スクールデスク土俵</span>
+        <div style="font-size:10px;color:#94a3b8;" id="battle-state-label">取り組み中</div>
+      </div>
+
+      <div class="wrestler-card" style="flex-direction:row-reverse;text-align:right;">
+        <div class="wrestler-avatar west">西</div>
+        <div class="wrestler-info">
+          <span class="wrestler-name" style="color:#f87171;">炎鵬丸（CPU）</span>
+          <span class="wrestler-side">紙相撲横綱</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Push Gauge (Tug-of-War Bar) -->
+    <div class="push-gauge-wrapper">
+      <div class="gauge-labels">
+        <span>← 東（寄り切り）</span>
+        <span>押し合い均衡</span>
+        <span>西（寄り切り） →</span>
+      </div>
+      <div class="push-track">
+        <div class="push-center-mark"></div>
+        <div class="push-indicator" id="push-indicator" style="left: 50%;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AR Desk Scan Overlay (Step 1) -->
+  <div id="ar-scan-overlay" onclick="triggerDohyoEmergence()">
+    <div class="scan-reticle">
+      <div class="reticle-corner tl"></div>
+      <div class="reticle-corner tr"></div>
+      <div class="reticle-corner bl"></div>
+      <div class="reticle-corner br"></div>
+      <div class="scan-center-dot"></div>
+    </div>
+    <div class="scan-prompt-box">
+      <div class="scan-prompt-title">📱 机を認識！タップして土俵を召喚</div>
+      <div class="scan-prompt-sub">机の平面を検知しました。画面をタップするとリアル土俵が出現します</div>
+    </div>
+  </div>
+
+  <!-- Gyoji Center Calls -->
+  <div id="announcement-box">
+    <div id="gyoji-call"></div>
+    <div id="sub-call"></div>
+  </div>
+
+  <!-- Chaotic Ton-Ton Cushion (Random Spot) -->
+  <div id="tonton-spot" onclick="handleSpotTap(event)">
+    <div class="spot-inner">ここを<br>叩け！</div>
+  </div>
+
+  <!-- Bottom HUD (Ton-Ton Arena) -->
+  <div class="bottom-hud" id="bottom-hud">
+    <div id="tap-arena" onpointerdown="handleArenaPointerDown(event)" onpointerup="handleArenaPointerUp(event)">
+      <div id="sync-ring"></div>
+      <div class="arena-hint">👆 画面をトントン叩く！</div>
+      <div class="arena-subhint">【押し】連続タップ ／ 【引き】長押しガード ／ 【うっちゃり】土俵際スワイプ</div>
+    </div>
+    <button class="reset-dohyo-btn" onclick="resetToScanMode()">📍 土俵を再設置（リセット）</button>
+  </div>
+</div>
+
+<!-- Rhythm Check Modal (Bot Protection & Tachiai Check) -->
+<div id="rhythm-modal">
+  <div class="rhythm-card">
+    <div class="rhythm-title">見合って見合って……</div>
+    <div class="rhythm-desc">
+      スマホから「<b>トン・トト・トン</b>」と力士の鼓動が振動します。<br>
+      同じリズムでボタンを3回タップしてください！
+    </div>
+    <div id="rhythm-touch-btn" onclick="handleRhythmInput()">押す！</div>
+    <div style="margin-top:16px;">
+      <button style="background:none;border:none;color:#94a3b8;font-size:12px;cursor:pointer;" onclick="passRhythmCheck()">⏩ スキップして開始</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ========================================================
+   AUDIO & HAPTICS (WEB AUDIO + VIBRATION API)
+   ======================================================== */
+const AudioContext = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+
+function initAudio() {
+  if (!audioCtx) audioCtx = new AudioContext();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playSound(type) {
+  initAudio();
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+
+  if (type === 'rumble') {
+    // Deep ground rumble for dohyo emergence
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(45, now);
+    osc.frequency.linearRampToValueAtTime(30, now + 1.2);
+    gain.gain.setValueAtTime(0.7, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 1.2);
+  } else if (type === 'ton') {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.frequency.setValueAtTime(130, now);
+    osc.frequency.exponentialRampToValueAtTime(40, now + 0.08);
+    gain.gain.setValueAtTime(0.5, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.08);
+  } else if (type === 'clash') {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(80, now);
+    osc.frequency.exponentialRampToValueAtTime(20, now + 0.25);
+    gain.gain.setValueAtTime(0.8, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.3);
+  } else if (type === 'utchari') {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(280, now);
+    osc.frequency.exponentialRampToValueAtTime(850, now + 0.35);
+    gain.gain.setValueAtTime(0.6, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.4);
+  } else if (type === 'win') {
+    [220, 440, 660].forEach((freq, idx) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.setValueAtTime(freq, now + idx * 0.1);
+      gain.gain.setValueAtTime(0.4, now + idx * 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.1 + 0.9);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now + idx * 0.1);
+      osc.stop(now + idx * 0.1 + 0.9);
+    });
+  }
+}
+
+function triggerVibe(pattern) {
+  if (navigator.vibrate) {
+    try { navigator.vibrate(pattern); } catch(e) {}
+  }
+}
+
+/* ========================================================
+   HIGH REALISM CANVAS TEXTURE GENERATORS
+   ======================================================== */
+function createClayMoundTexture() {
+  const cvs = document.createElement('canvas');
+  cvs.width = 512; cvs.height = 512;
+  const ctx = cvs.getContext('2d');
+
+  // Hard-packed clay soil base
+  ctx.fillStyle = '#b38d61';
+  ctx.fillRect(0, 0, 512, 512);
+
+  // Noise & Sand Granules
+  for (let i = 0; i < 40000; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const alpha = Math.random() * 0.18;
+    ctx.fillStyle = Math.random() > 0.5 ? `rgba(255,255,255,${alpha})` : `rgba(60,35,15,${alpha})`;
+    ctx.fillRect(x, y, Math.random() * 2 + 1, Math.random() * 2 + 1);
+  }
+
+  // Circular Dohyo Sand Ring Inset
+  const radGrad = ctx.createRadialGradient(256, 256, 120, 256, 256, 220);
+  radGrad.addColorStop(0, 'rgba(215, 185, 142, 0.4)');
+  radGrad.addColorStop(1, 'rgba(140, 95, 55, 0.6)');
+  ctx.fillStyle = radGrad;
+  ctx.beginPath();
+  ctx.arc(256, 256, 220, 0, Math.PI * 2);
+  ctx.fill();
+
+  // White Shikiri-sen (Two center lines with chalky rough edges)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+  ctx.fillRect(200, 206, 112, 8);
+  ctx.fillRect(200, 298, 112, 8);
+
+  const texture = new THREE.CanvasTexture(cvs);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  return texture;
+}
+
+function createStrawRopeTexture() {
+  const cvs = document.createElement('canvas');
+  cvs.width = 256; cvs.height = 64;
+  const ctx = cvs.getContext('2d');
+
+  // Straw / Woven Rope Base
+  ctx.fillStyle = '#c29b62';
+  ctx.fillRect(0, 0, 256, 64);
+
+  // Woven Straw Bands
+  for (let x = 0; x < 256; x += 16) {
+    ctx.fillStyle = 'rgba(70, 45, 15, 0.4)';
+    ctx.fillRect(x, 0, 4, 64);
+
+    ctx.fillStyle = 'rgba(255, 230, 160, 0.35)';
+    ctx.fillRect(x + 5, 0, 8, 64);
+  }
+
+  // Fine fibers
+  for (let i = 0; i < 3000; i++) {
+    const rx = Math.random() * 256;
+    const ry = Math.random() * 64;
+    ctx.fillStyle = Math.random() > 0.5 ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.2)';
+    ctx.fillRect(rx, ry, 3, 1);
+  }
+
+  const texture = new THREE.CanvasTexture(cvs);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.repeat.set(16, 1);
+  return texture;
+}
+
+function createPaperWrestlerTexture(mawashiColor, kanji) {
+  const cvs = document.createElement('canvas');
+  cvs.width = 256; cvs.height = 384;
+  const ctx = cvs.getContext('2d');
+
+  // Japanese Washi Cardboard texture
+  ctx.fillStyle = '#faf6eb';
+  ctx.fillRect(0, 0, 256, 384);
+
+  // Fine paper fibers
+  for (let i = 0; i < 6000; i++) {
+    const x = Math.random() * 256;
+    const y = Math.random() * 384;
+    ctx.fillStyle = 'rgba(180, 160, 130, 0.12)';
+    ctx.fillRect(x, y, Math.random() * 3 + 1, 1);
+  }
+
+  // Fold crease mark down the spine
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+  ctx.fillRect(126, 0, 4, 384);
+
+  // Mawashi (Belt)
+  ctx.fillStyle = mawashiColor;
+  ctx.fillRect(24, 205, 208, 70);
+
+  ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(24, 205, 208, 70);
+
+  // Kanji
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '900 44px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(kanji, 128, 255);
+
+  // Face
+  ctx.fillStyle = '#1e293b';
+  ctx.font = 'bold 30px sans-serif';
+  ctx.fillText('凸(｀・ω・´)凸', 128, 115);
+
+  // Chonmage (Topknot)
+  ctx.fillStyle = '#0f172a';
+  ctx.beginPath();
+  ctx.arc(128, 50, 24, 0, Math.PI * 2);
+  ctx.fill();
+
+  return new THREE.CanvasTexture(cvs);
+}
+
+/* ========================================================
+   THREE.JS 3D ARENA & REALISTIC DOHYO CONSTRUCTION
+   ======================================================== */
+let scene, camera, renderer;
+let dohyoRootGroup, moundMesh, strawTawaraRing;
+let eastWrestlerMesh, westWrestlerMesh;
+let particles = [];
+let cameraShake = { x: 0, y: 0, z: 0 };
+
+function init3D() {
+  const container = document.getElementById('canvas-container');
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 100);
+  camera.position.set(0, 7.8, 8.8);
+  camera.lookAt(0, 0.2, 0);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  container.appendChild(renderer.domElement);
+
+  // Lighting (Warm arena spotlighting)
+  const ambient = new THREE.AmbientLight(0xfff5ea, 1.4);
+  scene.add(ambient);
+
+  const mainSpot = new THREE.DirectionalLight(0xffeedd, 2.0);
+  mainSpot.position.set(5, 14, 8);
+  mainSpot.castShadow = true;
+  mainSpot.shadow.mapSize.width = 1024;
+  mainSpot.shadow.mapSize.height = 1024;
+  scene.add(mainSpot);
+
+  const fillSpot = new THREE.DirectionalLight(0x88bbff, 0.8);
+  fillSpot.position.set(-6, 8, -4);
+  scene.add(fillSpot);
+
+  // Build the Super-Realistic Dohyo Model
+  buildRealisticDohyo();
+
+  // Initially hide dohyo deep below the table
+  dohyoRootGroup.position.y = -6.0;
+  dohyoRootGroup.scale.set(0.2, 0.2, 0.2);
+
+  // Create Paper Wrestlers
+  eastWrestlerMesh = createPaperWrestler('#1d4ed8', '東');
+  westWrestlerMesh = createPaperWrestler('#b91c1c', '西');
+  eastWrestlerMesh.rotation.y = Math.PI / 2;
+  westWrestlerMesh.rotation.y = -Math.PI / 2;
+
+  // Wrestlers initially hidden
+  eastWrestlerMesh.visible = false;
+  westWrestlerMesh.visible = false;
+  scene.add(eastWrestlerMesh);
+  scene.add(westWrestlerMesh);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  animate();
+}
+
+function buildRealisticDohyo() {
+  dohyoRootGroup = new THREE.Group();
+
+  // 1. Square Hard-Packed Clay Mound (Kakudohyo Base)
+  const moundGeo = new THREE.CylinderGeometry(3.6, 4.1, 0.5, 48);
+  const moundTex = createClayMoundTexture();
+  const moundMat = new THREE.MeshStandardMaterial({
+    map: moundTex,
+    roughness: 0.85,
+    metalness: 0.05
+  });
+  moundMesh = new THREE.Mesh(moundGeo, moundMat);
+  moundMesh.position.y = -0.25;
+  moundMesh.receiveShadow = true;
+  moundMesh.castShadow = true;
+  dohyoRootGroup.add(moundMesh);
+
+  // 2. Straw Circle Rope (Shobu-dawara Straw Ring with Tokudawara)
+  const strawTex = createStrawRopeTexture();
+  const strawMat = new THREE.MeshStandardMaterial({
+    map: strawTex,
+    roughness: 0.8,
+    metalness: 0.05
+  });
+
+  // Circular ring of 20 realistic straw bales (俵)
+  strawTawaraRing = new THREE.Group();
+  const numBales = 24;
+  const radius = 3.0;
+
+  for (let i = 0; i < numBales; i++) {
+    const angle = (i / numBales) * Math.PI * 2;
+    // 4 Tokudawara (徳俵: North, South, East, West are pushed out slightly by 0.12)
+    const isTokudawara = i % 6 === 0;
+    const r = radius + (isTokudawara ? 0.12 : 0);
+
+    const baleGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.76, 16);
+    const bale = new THREE.Mesh(baleGeo, strawMat);
+    bale.position.set(Math.cos(angle) * r, 0.04, Math.sin(angle) * r);
+    bale.rotation.z = Math.PI / 2;
+    bale.rotation.y = -angle;
+    bale.castShadow = true;
+    bale.receiveShadow = true;
+    strawTawaraRing.add(bale);
+  }
+  dohyoRootGroup.add(strawTawaraRing);
+
+  // 3. Contact Shadow Beneath Dohyo
+  const shadowGeo = new THREE.PlaneGeometry(9.0, 9.0);
+  const shadowMat = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    transparent: true,
+    opacity: 0.45
+  });
+  const contactShadow = new THREE.Mesh(shadowGeo, shadowMat);
+  contactShadow.rotation.x = -Math.PI / 2;
+  contactShadow.position.y = -0.51;
+  dohyoRootGroup.add(contactShadow);
+
+  scene.add(dohyoRootGroup);
+}
+
+function createPaperWrestler(mawashiColor, kanji) {
+  const group = new THREE.Group();
+  const flapGeo = new THREE.PlaneGeometry(1.2, 1.8);
+  const frontTex = createPaperWrestlerTexture(mawashiColor, kanji);
+
+  const frontMat = new THREE.MeshStandardMaterial({
+    map: frontTex,
+    roughness: 0.7,
+    side: THREE.DoubleSide
+  });
+  const backMat = new THREE.MeshStandardMaterial({
+    color: 0xf5f0e1,
+    roughness: 0.8,
+    side: THREE.DoubleSide
+  });
+
+  // Folded Tent Flap 1
+  const flap1 = new THREE.Mesh(flapGeo, frontMat);
+  flap1.rotation.y = -Math.PI / 8;
+  flap1.position.set(0, 0.9, 0.25);
+  flap1.castShadow = true;
+  group.add(flap1);
+
+  // Folded Tent Flap 2
+  const flap2 = new THREE.Mesh(flapGeo, backMat);
+  flap2.rotation.y = Math.PI / 8;
+  flap2.position.set(0, 0.9, -0.25);
+  flap2.castShadow = true;
+  group.add(flap2);
+
+  return group;
+}
+
+/* ========================================================
+   AR DESK SCAN & DOHYO EMERGENCE SEQUENCE
+   ======================================================== */
+let isEmerged = false;
+
+function triggerDohyoEmergence() {
+  if (isEmerged) return;
+  isEmerged = true;
+  initAudio();
+
+  // Hide the Scan Reticle
+  document.getElementById('ar-scan-overlay').style.display = 'none';
+
+  // Sound & Vibration: Deep ground rumble
+  playSound('rumble');
+  triggerVibe([80, 40, 100, 40, 150, 60, 200]);
+
+  // Emerge Animation (Dohyo rises from beneath the desk surface)
+  let progress = 0;
+  const startY = -4.0;
+  const targetY = 0;
+
+  function stepEmergence() {
+    progress += 0.035;
+    const ease = 1 - Math.pow(1 - Math.min(1, progress), 3); // ease-out cubic
+    dohyoRootGroup.position.y = THREE.MathUtils.lerp(startY, targetY, ease);
+    dohyoRootGroup.scale.setScalar(THREE.MathUtils.lerp(0.3, 1.0, ease));
+
+    // Shake camera during rising
+    cameraShake.x = (Math.random() - 0.5) * 0.12 * (1 - ease);
+    cameraShake.y = (Math.random() - 0.5) * 0.12 * (1 - ease);
+
+    // Spawn dust particles
+    if (Math.random() > 0.4) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = 2.5 + Math.random() * 1.5;
+      spawnDustParticle(new THREE.Vector3(Math.cos(angle) * r, dohyoRootGroup.position.y + 0.2, Math.sin(angle) * r));
+    }
+
+    if (progress < 1) {
+      requestAnimationFrame(stepEmergence);
+    } else {
+      dohyoRootGroup.position.y = 0;
+      dohyoRootGroup.scale.set(1, 1, 1);
+      cameraShake = { x: 0, y: 0, z: 0 };
+
+      // Land Thud
+      playSound('clash');
+      triggerVibe([200]);
+
+      // Wrestlers descent onto Dohyo
+      animateWrestlersArrival();
+    }
+  }
+  stepEmergence();
+}
+
+function animateWrestlersArrival() {
+  eastWrestlerMesh.visible = true;
+  westWrestlerMesh.visible = true;
+
+  eastWrestlerMesh.position.set(-0.8, 3.5, 0);
+  westWrestlerMesh.position.set(0.8, 3.5, 0);
+
+  let p = 0;
+  function dropStep() {
+    p += 0.06;
+    const ease = Math.min(1, p);
+    eastWrestlerMesh.position.y = THREE.MathUtils.lerp(3.5, 0, ease);
+    westWrestlerMesh.position.y = THREE.MathUtils.lerp(3.5, 0, ease);
+
+    // Slight flutter like falling paper
+    eastWrestlerMesh.rotation.z = Math.sin(p * Math.PI * 4) * 0.2 * (1 - ease);
+    westWrestlerMesh.rotation.z = -Math.sin(p * Math.PI * 4) * 0.2 * (1 - ease);
+
+    if (p < 1) {
+      requestAnimationFrame(dropStep);
+    } else {
+      eastWrestlerMesh.position.y = 0;
+      westWrestlerMesh.position.y = 0;
+      eastWrestlerMesh.rotation.z = 0;
+      westWrestlerMesh.rotation.z = 0;
+
+      playSound('ton');
+      triggerVibe([50]);
+
+      // Reveal Battle HUD & Start Bout
+      document.getElementById('battle-hud').style.display = 'flex';
+      document.getElementById('bottom-hud').style.display = 'flex';
+      startBoutSequence();
+    }
+  }
+  dropStep();
+}
+
+function resetToScanMode() {
+  isEmerged = false;
+  gameState = 'IDLE';
+  document.getElementById('ar-scan-overlay').style.display = 'flex';
+  document.getElementById('battle-hud').style.display = 'none';
+  document.getElementById('bottom-hud').style.display = 'none';
+  document.getElementById('gyoji-call').innerText = "";
+  document.getElementById('sub-call').innerText = "";
+  document.getElementById('tonton-spot').style.display = 'none';
+
+  dohyoRootGroup.position.y = -6.0;
+  eastWrestlerMesh.visible = false;
+  westWrestlerMesh.visible = false;
+}
+
+/* ========================================================
+   GAMEPLAY & BOT-PROTECTED TACHIAI LOGIC
+   ======================================================== */
+let gameState = 'IDLE'; // IDLE, RHYTHM_CHECK, TACHIAI, BATTLE, RESULT
+let pushPosition = 0;
+let pStamina = 100;
+let isPulling = false;
+let pullTimer = null;
+let syncPhase = 0;
+let eastX = -0.8, westX = 0.8;
+let eastY = 0, westY = 0;
+let eastTilt = 0, westTilt = 0;
+let rhythmInputTimestamps = [];
+
+function startBoutSequence() {
+  if (gameState === 'BATTLE') return;
+  initAudio();
+
+  gameState = 'RHYTHM_CHECK';
+  rhythmInputTimestamps = [];
+  document.getElementById('rhythm-modal').classList.add('active');
+
+  setTimeout(() => {
+    triggerVibe([100, 250, 80, 200, 120]);
+    playSound('ton');
+    setTimeout(() => playSound('ton'), 350);
+    setTimeout(() => playSound('ton'), 650);
+  }, 400);
+}
+
+function handleRhythmInput() {
+  const now = Date.now();
+  rhythmInputTimestamps.push(now);
+  playSound('ton');
+  triggerVibe(30);
+
+  if (rhythmInputTimestamps.length >= 3) {
+    const diff1 = rhythmInputTimestamps[1] - rhythmInputTimestamps[0];
+    const diff2 = rhythmInputTimestamps[2] - rhythmInputTimestamps[1];
+
+    if (diff1 > 150 && diff1 < 700 && diff2 > 150 && diff2 < 700) {
+      passRhythmCheck();
+    } else {
+      rhythmInputTimestamps = [];
+      document.getElementById('gyoji-call').innerText = "待った！";
+      playSound('clash');
+      triggerVibe([200]);
+    }
+  }
+}
+
+function passRhythmCheck() {
+  document.getElementById('rhythm-modal').classList.remove('active');
+  startTachiai();
+}
+
+function startTachiai() {
+  gameState = 'TACHIAI';
+  pushPosition = 0;
+  pStamina = 100;
+  eastX = -0.8; westX = 0.8;
+  eastY = 0; westY = 0;
+  eastTilt = 0; westTilt = 0;
+  updatePushGauge();
+
+  const call = document.getElementById('gyoji-call');
+  const sub = document.getElementById('sub-call');
+  call.innerText = "はっけよい……";
+  sub.innerText = "両手を机について身構えよ！";
+  triggerVibe([80]);
+
+  setTimeout(() => {
+    call.innerText = "のこった！！";
+    sub.innerText = "トントン叩いて机を揺らせ！";
+    playSound('clash');
+    triggerVibe([150]);
+    gameState = 'BATTLE';
+    moveSpotRandomly();
+    startCpuLoop();
+  }, 1200);
+}
+
+function moveSpotRandomly() {
+  if (gameState !== 'BATTLE') {
+    document.getElementById('tonton-spot').style.display = 'none';
+    return;
+  }
+  const spot = document.getElementById('tonton-spot');
+  spot.style.display = 'flex';
+
+  const arena = document.getElementById('tap-arena');
+  const rect = arena.getBoundingClientRect();
+
+  const rx = rect.left + 50 + Math.random() * (rect.width - 100);
+  const ry = rect.top + 30 + Math.random() * (rect.height - 60);
+
+  spot.style.left = `${rx}px`;
+  spot.style.top = `${ry}px`;
+
+  setTimeout(moveSpotRandomly, 1600 + Math.random() * 800);
+}
+
+function handleSpotTap(e) {
+  e.stopPropagation();
+  if (gameState !== 'BATTLE') return;
+  doPlayerPush(2.2, true);
+}
+
+function handleArenaPointerDown(e) {
+  if (gameState !== 'BATTLE') return;
+
+  pullTimer = setTimeout(() => {
+    isPulling = true;
+    document.getElementById('gyoji-call').innerText = "引き技構え！";
+    triggerVibe([30, 40, 30]);
+  }, 350);
+}
+
+function handleArenaPointerUp(e) {
+  if (gameState !== 'BATTLE') return;
+  if (pullTimer) clearTimeout(pullTimer);
+
+  if (isPulling) {
+    isPulling = false;
+    executePullTactic();
+  } else {
+    doPlayerPush(1.0, false);
+  }
+}
+
+function doPlayerPush(multiplier = 1.0, isSpotHit = false) {
+  playSound('ton');
+
+  const isSyncPerfect = Math.abs(syncPhase - 0.5) < 0.15;
+  const finalMultiplier = multiplier * (isSyncPerfect ? 1.8 : 1.0);
+
+  pStamina = Math.max(10, pStamina - 4);
+  const staminaEff = pStamina / 100;
+
+  const pushForce = 3.6 * finalMultiplier * staminaEff;
+  pushPosition -= pushForce;
+
+  eastY = 0.35;
+  westTilt += 0.05;
+
+  if (isSpotHit) {
+    triggerVibe([40]);
+    spawnDustParticle(new THREE.Vector3(eastX + 0.3, 0.2, 0), 0xffd700);
+  } else {
+    triggerVibe([20]);
+  }
+
+  updatePushGauge();
+  checkWinCondition();
+}
+
+function executePullTactic() {
+  playSound('utchari');
+  triggerVibe([20, 40, 120]);
+  document.getElementById('gyoji-call').innerText = "いなした！";
+
+  westTilt = -0.38;
+  pushPosition -= 8.5;
+
+  updatePushGauge();
+  checkWinCondition();
+}
+
+function startCpuLoop() {
+  function cpuStep() {
+    if (gameState !== 'BATTLE') return;
+
+    const cpuPower = 2.4 + Math.random() * 1.5;
+    pushPosition += cpuPower;
+    westY = 0.3;
+
+    if (pushPosition > 20) {
+      triggerVibe([35, 45, 35, 45]);
+    }
+
+    updatePushGauge();
+    checkWinCondition();
+
+    const delay = isPulling ? 600 : 250 + Math.random() * 180;
+    setTimeout(cpuStep, delay);
+  }
+  setTimeout(cpuStep, 400);
+}
+
+function updatePushGauge() {
+  const clamped = Math.max(-100, Math.min(100, pushPosition));
+  const pct = 50 + clamped * 0.45;
+  document.getElementById('push-indicator').style.left = `${pct}%`;
+  document.getElementById('p-stamina').innerText = `${Math.round(pStamina)}%`;
+
+  const centerShift = clamped * 0.024;
+  eastX = -0.8 + centerShift;
+  westX = 0.8 + centerShift;
+}
+
+function checkWinCondition() {
+  if (gameState !== 'BATTLE') return;
+
+  const call = document.getElementById('gyoji-call');
+  const sub = document.getElementById('sub-call');
+
+  if (pushPosition <= -75 || westTilt < -0.6) {
+    gameState = 'RESULT';
+    call.innerText = "勝負あり！東の勝ち！";
+    sub.innerText = "豪快な寄り切り！机上を完全制圧！";
+    playSound('win');
+    triggerVibe([100, 60, 100, 60, 300]);
+    westTilt = -1.2;
+    westY = 0.8;
+  } else if (pushPosition >= 75 || eastTilt > 0.6) {
+    gameState = 'RESULT';
+    call.innerText = "勝負あり！西の勝ち…";
+    sub.innerText = "押し出された…もう一番！";
+    playSound('clash');
+    triggerVibe([250]);
+    eastTilt = 1.2;
+    eastY = 0.8;
+  }
+}
+
+/* ========================================================
+   CAMERA & BACKGROUND TOGGLES
+   ======================================================== */
+let isCameraActive = false;
+let isDarkBg = true;
+
+async function toggleCamera() {
+  const video = document.getElementById('camera-video');
+  const studioBg = document.getElementById('studio-bg');
+  const btn = document.getElementById('cam-toggle-btn');
+
+  if (isCameraActive) {
+    if (video.srcObject) {
+      video.srcObject.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+    }
+    video.style.display = 'none';
+    studioBg.style.display = 'block';
+    btn.innerText = '📷 カメラAR';
+    isCameraActive = false;
+  } else {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+      video.srcObject = stream;
+      video.style.display = 'block';
+      studioBg.style.display = 'none';
+      btn.innerText = '🛑 カメラOFF';
+      isCameraActive = true;
+    } catch (err) {
+      alert("カメラの起動が許可されませんでした。背景なし（スタジオ）モードで続行します。");
+    }
+  }
+}
+
+function toggleBackground() {
+  const studioBg = document.getElementById('studio-bg');
+  const btn = document.getElementById('bg-toggle-btn');
+  if (isDarkBg) {
+    studioBg.style.background = '#000000'; // Pure transparent black
+    btn.innerText = '✨ スタジオ背景';
+    isDarkBg = false;
+  } else {
+    studioBg.style.background = 'radial-gradient(circle at 50% 45%, #181d2a 0%, #0d1017 65%, #050608 100%)';
+    btn.innerText = '⬛ 背景なし';
+    isDarkBg = true;
+  }
+}
+
+/* ========================================================
+   PARTICLES & ANIMATION LOOP
+   ======================================================== */
+function spawnDustParticle(pos, colorHex = 0xc2a679) {
+  const geo = new THREE.BufferGeometry();
+  const count = 20;
+  const positions = new Float32Array(count * 3);
+  const velocities = [];
+
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = pos.x;
+    positions[i * 3 + 1] = pos.y;
+    positions[i * 3 + 2] = pos.z;
+    velocities.push(
+      (Math.random() - 0.5) * 3,
+      Math.random() * 2.5 + 0.8,
+      (Math.random() - 0.5) * 3
+    );
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  const mat = new THREE.PointsMaterial({
+    color: colorHex,
+    size: 0.16,
+    transparent: true,
+    opacity: 0.85
+  });
+  const pts = new THREE.Points(geo, mat);
+  scene.add(pts);
+  particles.push({ mesh: pts, velocities: velocities, life: 1.0 });
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  // Camera Shake
+  camera.position.x = THREE.MathUtils.lerp(camera.position.x, cameraShake.x, 0.2);
+  camera.position.y = THREE.MathUtils.lerp(camera.position.y, 7.8 + cameraShake.y, 0.2);
+  camera.position.z = THREE.MathUtils.lerp(camera.position.z, 8.8 + cameraShake.z, 0.2);
+
+  // Sync Ring Pulse
+  syncPhase = (syncPhase + 0.015) % 1;
+  const ring = document.getElementById('sync-ring');
+  if (gameState === 'BATTLE') {
+    ring.style.opacity = Math.sin(syncPhase * Math.PI) * 0.7;
+    ring.style.transform = `scale(${0.8 + syncPhase * 0.8})`;
+  } else {
+    ring.style.opacity = '0';
+  }
+
+  // Stamina Recovery
+  if (pStamina < 100 && gameState === 'BATTLE') {
+    pStamina = Math.min(100, pStamina + 0.15);
+    document.getElementById('p-stamina').innerText = `${Math.round(pStamina)}%`;
+  }
+
+  // Wrestlers Physics (Hopping & Tilting)
+  if (eastWrestlerMesh && westWrestlerMesh && isEmerged) {
+    eastY = Math.max(0, eastY - 0.035);
+    westY = Math.max(0, westY - 0.035);
+
+    eastTilt = THREE.MathUtils.lerp(eastTilt, 0, 0.08);
+    westTilt = THREE.MathUtils.lerp(westTilt, 0, 0.08);
+
+    eastWrestlerMesh.position.set(eastX, eastY, 0);
+    westWrestlerMesh.position.set(westX, westY, 0);
+
+    eastWrestlerMesh.rotation.z = eastTilt;
+    westWrestlerMesh.rotation.z = westTilt;
+
+    // Dohyo subtle vibration while battle
+    if (gameState === 'BATTLE') {
+      dohyoRootGroup.position.y = (Math.random() - 0.5) * 0.02;
+    } else {
+      dohyoRootGroup.position.y = 0;
+    }
+  }
+
+  // Particle Updates
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= 0.035;
+    const pos = p.mesh.geometry.attributes.position.array;
+    for (let j = 0; j < p.velocities.length / 3; j++) {
+      pos[j * 3] += p.velocities[j * 3] * 0.016;
+      pos[j * 3 + 1] += p.velocities[j * 3 + 1] * 0.016;
+      pos[j * 3 + 2] += p.velocities[j * 3 + 2] * 0.016;
+      p.velocities[j * 3 + 1] -= 0.08;
+    }
+    p.mesh.geometry.attributes.position.needsUpdate = true;
+    p.mesh.material.opacity = Math.max(0, p.life);
+
+    if (p.life <= 0) {
+      scene.remove(p.mesh);
+      particles.splice(i, 1);
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+
+// Start
+init3D();
+</script>
+</body>
+</html>
